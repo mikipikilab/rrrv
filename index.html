@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Status ordinacije</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { background:#000; color:#fff; font-family: system-ui, Arial, sans-serif; margin:0; text-align:center; padding:20px; }
+  .status-img { display:block; width:250px; margin:20px auto; animation:swing 2s ease-in-out infinite; }
+  h1 { margin:10px 0; font-size:22px; }
+  p { margin:0; font-size:16px; opacity:.95; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; max-width:980px; margin:0 auto 6px; }
+  .admin-link { color:#4ade80; cursor:pointer; text-decoration:underline; font-weight:700; }
+  @keyframes swing { 0%{transform:rotate(-5deg);} 50%{transform:rotate(5deg);} 100%{transform:rotate(-5deg);} }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span></span>
+    <a class="admin-link" href="/admin.html">⚙️ Admin</a>
+  </div>
+
+  <img id="statusImg" class="status-img" src="close.png" alt="Status ordinacije" />
+  <h1 id="statusText">Ordinacija je zatvorena.</h1>
+  <p id="workHours"></p>
+
+<script>
+(function(){
+  function $(s){return document.querySelector(s);}
+  function fmtDateISO(d){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
+  function minOf(hhmm){ const [h,m]=String(hhmm||'').split(':').map(Number); return (h||0)*60+(m||0); }
+  function std(day){ if(day>=1&&day<=5) return { start:'10:00', end:'20:00', closed:false }; if(day===6) return { start:'10:00', end:'14:00', closed:false }; return { closed:true }; }
+  async function getAll(){ const r=await fetch('/api/overrides'); const j=await r.json().catch(()=>({})); return j||{}; }
+  async function render(){
+    const now = new Date(); const dow = now.getDay(); const iso = fmtDateISO(now);
+    let map = {}; try { map = await getAll(); } catch {}
+    const plan = map[iso] || std(dow);
+    const img = $('#statusImg'); const txt = $('#statusText'); const wh = $('#workHours');
+    if (plan.closed){ img.src='close.png'; txt.textContent = (dow===0?'Neradni dan (nedjelja).':'Neradni dan.'); wh.textContent='Ordinacija je zatvorena.'; return; }
+    const nowMin = now.getHours()*60 + now.getMinutes();
+    const s=minOf(plan.start), e=minOf(plan.end);
+    if (nowMin >= s && nowMin < e) { img.src='open.png'; txt.textContent='Ordinacija je otvorena.'; } else { img.src='close.png'; txt.textContent='Ordinacija je zatvorena.'; }
+    wh.textContent = `Radno vrijeme od ${plan.start} do ${plan.end} časova.`;
+  }
+  render(); setInterval(render, 60000);
+})();
+</script>
+</body>
+</html>

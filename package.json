@@ -1,0 +1,8 @@
+{
+  "name": "clinic-status",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^6.5.0"
+  }
+}
