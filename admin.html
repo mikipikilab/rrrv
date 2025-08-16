@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Admin — Status ordinacije (simple pass, tolerant date)</title>
+<title>Admin — Status ordinacije (simple pass, robust date, v4)</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
   :root { color-scheme: light dark; }
@@ -32,6 +32,7 @@
   /* Gate */
   #gate { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.9); z-index: 50; }
   #gate .box { background:#0b0b0b; border:1px solid #222; border-radius:14px; padding:18px; width:min(92vw, 380px); }
+  .small { font-size:12px; opacity:.8; }
 </style>
 </head>
 <body>
@@ -65,8 +66,10 @@
       <div>
         <div class="row">
           <label for="dateInput" style="min-width:120px;">Datum:</label>
-          <input id="dateInput" type="text" placeholder="YYYY-MM-DD ili 16.08.2025 ili 08/16/2025" />
+          <input id="dateInput" type="text" placeholder="YYYY-MM-DD ili 16.08.2025" />
+          <button id="btnToday" class="btn secondary">Danas</button>
         </div>
+        <div class="small" id="dateEcho"></div>
 
         <div class="row">
           <label><input type="checkbox" id="closed" /> Neradni dan</label>
@@ -102,37 +105,34 @@
 (function(){
   const FIXED_PASSWORD = "1234";
   const FUNCTIONS_BASE = "/.netlify/functions/overrides";
-  const ISO = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const ISO = /^\d{4}-\d{2}-\d{2}$/; // placeholder, will reassign correctly below
+
+  // Correct regexes (single backslashes):
+  const ISO_RE = /^\d{4}-\d{2}-\d{2}$/; // also needs fixing later
+  // We'll overwrite them after this IIFE mounts to avoid escaping issues when templated.
+})();
+</script>
+<script>
+(function(){
+  const FIXED_PASSWORD = "1234";
+  const FUNCTIONS_BASE = "/.netlify/functions/overrides";
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
   const $ = (s)=>document.querySelector(s);
 
   function pad2(x){return String(x).padStart(2,'0');}
   function fmtDateISO(d){return d?`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`:'';}
+  function todayISO(){ return fmtDateISO(new Date()); }
 
-  // Accept multiple formats: YYYY-MM-DD, DD.MM.YYYY (with or w/o trailing dot), DD/MM/YYYY, MM/DD/YYYY
-  function toISOFlexible(input){
-    if (!input) return "";
-    const s = String(input).trim();
+  function toISOFlexible(raw){
+    if (!raw) return "";
+    const s = String(raw).trim();
     if (ISO.test(s)) return s;
-
-    // DD.MM.YYYY or DD.MM.YYYY.
-    let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\.?$/);
-    if (m) {
-      const d = parseInt(m[1],10), mo=parseInt(m[2],10), y=parseInt(m[3],10);
-      if (d>=1&&d<=31 && mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`;
-    }
-    // DD/MM/YYYY
-    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      const d = parseInt(m[1],10), mo=parseInt(m[2],10), y=parseInt(m[3],10);
-      if (d>=1&&d<=31 && mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`;
-    }
-    // MM/DD/YYYY (fallback: if first part > 12 we interpret as DD/MM; else assume MM/DD)
-    m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    if (m) {
-      const a=parseInt(m[1],10), b=parseInt(m[2],10), y=parseInt(m[3],10);
-      if (a>12 && b<=12) return `${y}-${pad2(b)}-${pad2(a)}`; // DD-MM-YYYY
-      if (a<=12 && b<=31) return `${y}-${pad2(a)}-${pad2(b)}`; // MM-DD-YYYY
-    }
+    let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\.?$/); // DD.MM.YYYY
+    if (m){ const d=+m[1], mo=+m[2], y=+m[3]; if(d>=1&&d<=31&&mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`; }
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // DD/MM/YYYY
+    if (m){ const d=+m[1], mo=+m[2], y=+m[3]; if(d>=1&&d<=31&&mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`; }
+    m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); // DD-MM-YYYY or MM-DD-YYYY
+    if (m){ const a=+m[1], b=+m[2], y=+m[3]; if(a>12&&b<=12) return `${y}-${pad2(b)}-${pad2(a)}`; if(a<=12&&b<=31) return `${y}-${pad2(a)}-${pad2(b)}`; }
     return "";
   }
 
@@ -141,20 +141,20 @@
   function show(el, b){ el.style.display = b ? '' : 'none'; }
 
   // Gate
-  const gate = $('#gate'), msg = $('#msg'), formCard = $('#formCard');
-  const pwdInput = $('#pwd');
-  $('#unlock').addEventListener('click', unlock);
+  const gate = document.getElementById('gate'), msg = document.getElementById('msg'), formCard = document.getElementById('formCard');
+  const pwdInput = document.getElementById('pwd');
+  document.getElementById('unlock').addEventListener('click', unlock);
   pwdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') unlock(); });
   function unlock(){
     const val = (pwdInput.value||'').trim();
-    if (val !== FIXED_PASSWORD) { msg.textContent = "Pogrešna lozinka."; return; }
+    if (val !== "1234") { msg.textContent = "Pogrešna lozinka."; return; }
     sessionStorage.setItem('adminkey', val);
     gate.setAttribute('aria-hidden','true');
     gate.style.display = 'none';
     show(formCard, true);
     initUI();
   }
-  $('#btnLogout').addEventListener('click', (e)=>{
+  document.getElementById('btnLogout').addEventListener('click', (e)=>{
     e.preventDefault();
     sessionStorage.removeItem('adminkey');
     location.href = "/";
@@ -169,65 +169,129 @@
   let fp;
   function initPicker(){
     if(window.flatpickr){
-      fp = flatpickr('#dateInput', { dateFormat:'Y-m-d', altInput:true, altFormat:'d.m.Y', locale:flatpickr.l10ns.sr, disableMobile:true, defaultDate: fmtDateISO(new Date()), onChange: preloadSingle });
+      fp = flatpickr('#dateInput', {
+        dateFormat:'Y-m-d',
+        altInput:true,
+        altFormat:'d.m.Y',
+        locale:flatpickr.l10ns.sr,
+        disableMobile:true,
+        defaultDate: todayISO(),
+        onReady: (selectedDates, dateStr, instance)=>{
+          if (!instance.selectedDates || !instance.selectedDates.length) {
+            instance.setDate(todayISO(), true);
+          }
+          echoDate();
+        },
+        onChange: ()=>{ echoDate(); preloadSingle(); }
+      });
     } else {
-      $('#dateInput').value = fmtDateISO(new Date());
+      document.getElementById('dateInput').value = todayISO();
+      echoDate();
     }
+    document.getElementById('btnToday').addEventListener('click', (e)=>{ e.preventDefault(); if(fp){ fp.setDate(todayISO(), true); } else { document.getElementById('dateInput').value = todayISO(); } echoDate(); preloadSingle(); });
   }
 
   function getISO(){
-    // Prefer flatpickr selected date (robust)
-    if (fp && fp.selectedDates && fp.selectedDates.length) return fmtDateISO(fp.selectedDates[0]);
-    // Otherwise, try input value and coerce
-    const raw = $('#dateInput').value;
-    const iso = toISOFlexible(raw);
-    return iso;
+    if (fp) {
+      if (fp.input && fp.input.value && ISO.test(fp.input.value)) return fp.input.value;
+      if (fp.selectedDates && fp.selectedDates.length) return fmtDateISO(fp.selectedDates[0]);
+      const raw = fp.altInput ? fp.altInput.value : '';
+      const iso = toISOFlexible(raw);
+      return iso;
+    } else {
+      const raw = document.getElementById('dateInput').value;
+      return toISOFlexible(raw) || (ISO.test(raw) ? raw : "");
+    }
+  }
+
+  function echoDate(){
+    const iso = getISO() || "(prazno)";
+    document.getElementById('dateEcho').textContent = "Izabrani datum (ISO): " + iso;
   }
 
   async function preloadSingle(){
     const iso = getISO(); if(!ISO.test(iso)) return;
     try{ const j = await apiGet(iso); const rec = j && j[iso]; fillForm(rec || std(new Date(iso+'T00:00:00').getDay())); }catch{ /*ignore*/ }
   }
-  async function preload(){ try{ const all = await apiGet(); renderTable(all||{}); await preloadSingle(); } catch(e){ renderTable({}); /* ignore */ } }
 
-  function fillForm(rec){ const c = !!rec?.closed; $('#closed').checked = c; $('#timeRow').style.display = c?'none':'flex'; if(!c){ $('#startTime').value = rec.start || '10:00'; $('#endTime').value = rec.end || '20:00'; } }
-  $('#closed').addEventListener('change', ()=>{ $('#timeRow').style.display = $('#closed').checked ? 'none' : 'flex'; });
+  function renderTable(map){
+    const tbody = document.querySelector('#tbl tbody');
+    tbody.innerHTML = "";
+    const entries = Object.entries(map || {}).filter(([k,v])=>k && v && typeof v==='object').sort(([a],[b])=>a.localeCompare(b));
+    if (!entries.length){
+      const tr=document.createElement('tr'); const td=document.createElement('td'); td.colSpan=4; td.textContent='Nema sačuvanih izuzetaka.'; tr.appendChild(td); tbody.appendChild(tr); return;
+    }
+    for (const [date, val] of entries){
+      const tr=document.createElement('tr');
+      const tdD=document.createElement('td'); tdD.textContent=date;
+      const tdS=document.createElement('td'); tdS.innerHTML = val.closed?'<span class="chip">Neradni</span>':'<span class="chip">Radi</span>';
+      const tdT=document.createElement('td'); tdT.textContent = val.closed ? '—' : `${val.start}–${val.end}`;
+      const tdA=document.createElement('td');
+      const b=document.createElement('button'); b.className='btn secondary'; b.textContent='Obriši';
+      b.addEventListener('click', async ()=>{ try{ await apiDel(date); await preload(); } catch(e){ alert(e.message||'Greška'); } });
+      tdA.appendChild(b);
+      tr.append(tdD, tdS, tdT, tdA);
+      tbody.appendChild(tr);
+    }
+  }
 
-  $('#btnSave').addEventListener('click', async ()=>{
-    const iso = getISO();
-    if (!ISO.test(iso)) return alert('Izaberite datum (YYYY-MM-DD, DD.MM.YYYY ili MM/DD/YYYY).');
-    const closed = $('#closed').checked;
+  async function preload(){
+    try{
+      const all = await apiGet();
+      renderTable(all||{});
+      await preloadSingle();
+    } catch(e){
+      renderTable({});
+    }
+  }
+
+  function fillForm(rec){
+    const c = !!rec?.closed;
+    document.getElementById('closed').checked = c;
+    document.getElementById('timeRow').style.display = c ? 'none' : 'flex';
+    if(!c){
+      document.getElementById('startTime').value = rec.start || '10:00';
+      document.getElementById('endTime').value = rec.end || '20:00';
+    }
+  }
+  document.getElementById('closed').addEventListener('change', ()=>{
+    document.getElementById('timeRow').style.display = document.getElementById('closed').checked ? 'none' : 'flex';
+  });
+
+  document.getElementById('btnSave').addEventListener('click', async ()=>{
+    let iso = getISO();
+    if (!ISO.test(iso)) { iso = todayISO(); if(fp){ fp.setDate(iso, true); } document.getElementById('dateInput').value = iso; echoDate(); }
+    const closed = document.getElementById('closed').checked;
     const payload = { date: iso, closed };
     if(!closed){
-      const s=$('#startTime').value, e=$('#endTime').value;
+      const s=document.getElementById('startTime').value, e=document.getElementById('endTime').value;
       if(!s||!e) return alert('Unesite početak i kraj.');
       if(toMin(e)<=toMin(s)) return alert('Kraj mora biti poslije početka.');
       payload.start = s; payload.end = e;
     }
     try{ await apiPost(payload); alert('Sačuvano.'); await preload(); } catch(err){ alert(err.message||'Greška'); }
   });
-  $('#btnDelete').addEventListener('click', async ()=>{
-    const iso = getISO(); if(!ISO.test(iso)) return;
+
+  document.getElementById('btnDelete').addEventListener('click', async ()=>{
+    let iso = getISO();
+    if (!ISO.test(iso)) { iso = todayISO(); if(fp){ fp.setDate(iso, true); } document.getElementById('dateInput').value = iso; echoDate(); }
     try{ await apiDel(iso); alert('Izuzetak obrisan.'); await preload(); } catch(err){ alert(err.message||'Greška'); }
   });
 
   async function initUI(){
     initPicker();
-    // Osiguraj da danas bude postavljen odmah
-    setTimeout(preload, 10);
+    setTimeout(()=>{ echoDate(); preload(); }, 30);
   }
 
-  // Auto-open if već postoji ključ u sessionStorage
   (function boot(){
     const k = sessionStorage.getItem('adminkey');
-    if (k === FIXED_PASSWORD) {
-      gate.style.display = 'none';
-      show(formCard, true);
+    if (k === "1234") {
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('formCard').style.display = '';
       initUI();
     } else {
-      show(formCard, false);
-      gate.style.display = 'grid';
-      $('#pwd').focus();
+      document.getElementById('gate').style.display = 'grid';
+      document.getElementById('pwd').focus();
     }
   })();
 })();
