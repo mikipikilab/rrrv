@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Admin — Status ordinacije (simple pass)</title>
+<title>Admin — Status ordinacije (simple pass, tolerant date)</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <style>
   :root { color-scheme: light dark; }
@@ -65,7 +65,7 @@
       <div>
         <div class="row">
           <label for="dateInput" style="min-width:120px;">Datum:</label>
-          <input id="dateInput" type="text" placeholder="YYYY-MM-DD" />
+          <input id="dateInput" type="text" placeholder="YYYY-MM-DD ili 16.08.2025 ili 08/16/2025" />
         </div>
 
         <div class="row">
@@ -100,22 +100,51 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/sr.js"></script>
 <script>
 (function(){
-  const FIXED_PASSWORD = "1234";   // <- traženo: ulazna lozinka
-  const FUNCTIONS_BASE = "/.netlify/functions/overrides"; // direktno na funkciju
+  const FIXED_PASSWORD = "1234";
+  const FUNCTIONS_BASE = "/.netlify/functions/overrides";
   const ISO = /^\\d{4}-\\d{2}-\\d{2}$/;
   const $ = (s)=>document.querySelector(s);
 
-  function fmtDateISO(d){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
+  function pad2(x){return String(x).padStart(2,'0');}
+  function fmtDateISO(d){return d?`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`:'';}
+
+  // Accept multiple formats: YYYY-MM-DD, DD.MM.YYYY (with or w/o trailing dot), DD/MM/YYYY, MM/DD/YYYY
+  function toISOFlexible(input){
+    if (!input) return "";
+    const s = String(input).trim();
+    if (ISO.test(s)) return s;
+
+    // DD.MM.YYYY or DD.MM.YYYY.
+    let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\.?$/);
+    if (m) {
+      const d = parseInt(m[1],10), mo=parseInt(m[2],10), y=parseInt(m[3],10);
+      if (d>=1&&d<=31 && mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`;
+    }
+    // DD/MM/YYYY
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const d = parseInt(m[1],10), mo=parseInt(m[2],10), y=parseInt(m[3],10);
+      if (d>=1&&d<=31 && mo>=1&&mo<=12) return `${y}-${pad2(mo)}-${pad2(d)}`;
+    }
+    // MM/DD/YYYY (fallback: if first part > 12 we interpret as DD/MM; else assume MM/DD)
+    m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+    if (m) {
+      const a=parseInt(m[1],10), b=parseInt(m[2],10), y=parseInt(m[3],10);
+      if (a>12 && b<=12) return `${y}-${pad2(b)}-${pad2(a)}`; // DD-MM-YYYY
+      if (a<=12 && b<=31) return `${y}-${pad2(a)}-${pad2(b)}`; // MM-DD-YYYY
+    }
+    return "";
+  }
+
   function toMin(t){const [h,m]=String(t||'').split(':').map(Number);return (h||0)*60+(m||0);}
   function std(day){ if(day>=1&&day<=5) return {start:'10:00',end:'20:00',closed:false}; if(day===6) return {start:'10:00',end:'14:00',closed:false}; return {closed:true}; }
   function show(el, b){ el.style.display = b ? '' : 'none'; }
 
-  // Gate logic
+  // Gate
   const gate = $('#gate'), msg = $('#msg'), formCard = $('#formCard');
   const pwdInput = $('#pwd');
   $('#unlock').addEventListener('click', unlock);
   pwdInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') unlock(); });
-
   function unlock(){
     const val = (pwdInput.value||'').trim();
     if (val !== FIXED_PASSWORD) { msg.textContent = "Pogrešna lozinka."; return; }
@@ -145,9 +174,18 @@
       $('#dateInput').value = fmtDateISO(new Date());
     }
   }
-  function getISO(){ return fp && fp.input && fp.input.value ? fp.input.value : $('#dateInput').value; }
 
-  async function preloadSingle(){ const iso = getISO(); if(!ISO.test(iso)) return;
+  function getISO(){
+    // Prefer flatpickr selected date (robust)
+    if (fp && fp.selectedDates && fp.selectedDates.length) return fmtDateISO(fp.selectedDates[0]);
+    // Otherwise, try input value and coerce
+    const raw = $('#dateInput').value;
+    const iso = toISOFlexible(raw);
+    return iso;
+  }
+
+  async function preloadSingle(){
+    const iso = getISO(); if(!ISO.test(iso)) return;
     try{ const j = await apiGet(iso); const rec = j && j[iso]; fillForm(rec || std(new Date(iso+'T00:00:00').getDay())); }catch{ /*ignore*/ }
   }
   async function preload(){ try{ const all = await apiGet(); renderTable(all||{}); await preloadSingle(); } catch(e){ renderTable({}); /* ignore */ } }
@@ -156,7 +194,8 @@
   $('#closed').addEventListener('change', ()=>{ $('#timeRow').style.display = $('#closed').checked ? 'none' : 'flex'; });
 
   $('#btnSave').addEventListener('click', async ()=>{
-    const iso = getISO(); if(!ISO.test(iso)) return alert('Izaberite datum (YYYY-MM-DD).');
+    const iso = getISO();
+    if (!ISO.test(iso)) return alert('Izaberite datum (YYYY-MM-DD, DD.MM.YYYY ili MM/DD/YYYY).');
     const closed = $('#closed').checked;
     const payload = { date: iso, closed };
     if(!closed){
@@ -174,7 +213,8 @@
 
   async function initUI(){
     initPicker();
-    await preload();
+    // Osiguraj da danas bude postavljen odmah
+    setTimeout(preload, 10);
   }
 
   // Auto-open if već postoji ključ u sessionStorage
